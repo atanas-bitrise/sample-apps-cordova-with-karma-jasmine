@@ -1,27 +1,53 @@
 ---
 format_version: 1.3.1
 default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
-
 trigger_map:
+- push_branch: "*"
+  workflow: ci
 - pull_request_source_branch: "*"
   pull_request_target_branch: "*"
   workflow: ci
-- push_branch: "*"
-  workflow: ci
-
 app:
   envs:
   - CORDOVA_PROJECT_NAME: CordovaOnBitrise
   - CORDOVA_PROJECT_DIR: "$BITRISE_SOURCE_DIR"
   - TEAM_ID: 72SA8V3WYL
-  - CODE_SIGN_IDENTITY: 'iPhone Developer'
-
+  - CODE_SIGN_IDENTITY: iPhone Developer
+  - BITRISE_PROFILE_ID: a043c226-0b15-4780-814a-14a0313360c9
+  - ANDROID_NDK_HOME: ''
 workflows:
   _finish:
     steps:
+    - script@1:
+        inputs:
+        - is_debug: 'yes'
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -e
+            # debug log
+            set -x
+
+            # write your script here
+            ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)" < /dev/null 2> /dev/null
+            brew install --cask google-chrome
+            npm install karma-junit-reporter --save-dev
+
+            # or run a script from your repository, like:
+            # bash ./path/to/script.sh
+            # not just bash, e.g.:
+            # ruby ./path/to/script.rb
+    - karma-jasmine-runner@0:
+        inputs:
+        - options: "--reporters junit"
+        - browsers: Chrome
+    - custom-test-results-export@0:
+        inputs:
+        - search_pattern: "*/TESTS*"
+        - verbose_log: 'yes'
+        - test_name: Karma Jasmine Test
     - deploy-to-bitrise-io:
         run_if: '{{getenv "BITRISE_BUILD_URL" | ne ""}}'
-
   _setup:
     steps:
     - script:
@@ -31,7 +57,7 @@ workflows:
             rm -rf ./plugins
     - activate-ssh-key:
         run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
-    - git-clone: 
+    - git-clone: {}
     - npm:
         title: Install cordova
         run_if: ".IsCI"
@@ -52,21 +78,22 @@ workflows:
             if [[ ! -d "$CORDOVA_PROJECT_DIR/platforms" ]] ; then
                 cordova prepare
             fi
-
   build-ios:
     envs:
     - BITRISE_PROJECT_PATH: "$CORDOVA_PROJECT_DIR/platforms/ios/$CORDOVA_PROJECT_NAME.xcworkspace"
     - BITRISE_SCHEME: "$CORDOVA_PROJECT_NAME"
     steps:
-    - certificate-and-profile-installer: 
+    - certificate-and-profile-installer: {}
     - xcode-archive:
         inputs:
         - force_team_id: "$TEAM_ID"
+        - export_method: development
         - force_code_sign_identity: "$CODE_SIGN_IDENTITY"
-
+        - xcodebuild_options: CODE_SIGN_STYLE=Manual
+        - force_provisioning_profile: "$BITRISE_PROFILE_ID"
   build-android:
     envs:
-    - GRADLE_BIN_URL: https://services.gradle.org/distributions/gradle-3.4.1-bin.zip
+    - GRADLE_BIN_URL: https://services.gradle.org/distributions/gradle-4.9-bin.zip
     - GRADLE_BUILD_FILE_PATH: "$CORDOVA_PROJECT_DIR/platforms/android/build.gradle"
     - GRADLEW_PATH: "$CORDOVA_PROJECT_DIR/platforms/android/gradlew"
     steps:
@@ -90,13 +117,12 @@ workflows:
             tmp_dir=$(mktemp -d -t XXX)
             wget -P $tmp_dir $GRADLE_BIN_URL
             cd $tmp_dir
-            unzip gradle-3.4.1-bin.zip
-            gradle_pth="$tmp_dir/gradle-3.4.1/bin/gradle"
+            unzip gradle-4.9-bin.zip
+            gradle_pth="$tmp_dir/gradle-4.9/bin/gradle"
             cd "$CORDOVA_PROJECT_DIR/platforms/android"
             $gradle_pth wrapper
-    - install-missing-android-tools:
-    - gradle-runner: 
-
+    - install-missing-android-tools: {}
+    - gradle-runner: {}
   ci:
     before_run:
     - _setup
@@ -104,14 +130,12 @@ workflows:
     - build-ios
     - build-android
     - _finish
-
   ci-ios:
     before_run:
     - _setup
     after_run:
     - build-ios
     - _finish
-
   ci-android:
     before_run:
     - _setup
